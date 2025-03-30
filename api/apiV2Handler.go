@@ -1,47 +1,47 @@
 package api
 
 import (
-	"encoding/json"
-	"s-ui/logger"
 	"s-ui/util/common"
-	"time"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
-type TokenInMemory struct {
-	Token    string
-	Expiry   int64
-	Username string
-}
-
-type APIv2Handler struct {
+type APIHandler struct {
 	ApiService
-	tokens *[]TokenInMemory
+	apiv2 *APIv2Handler
 }
 
-func NewAPIv2Handler(g *gin.RouterGroup) *APIv2Handler {
-	a := &APIv2Handler{}
-	a.ReloadTokens()
+func NewAPIHandler(g *gin.RouterGroup, a2 *APIv2Handler) {
+	a := &APIHandler{
+		apiv2: a2,
+	}
 	a.initRouter(g)
-	return a
 }
 
-func (a *APIv2Handler) initRouter(g *gin.RouterGroup) {
+func (a *APIHandler) initRouter(g *gin.RouterGroup) {
 	g.Use(func(c *gin.Context) {
-		a.checkToken(c)
+		path := c.Request.URL.Path
+		if !strings.HasSuffix(path, "login") && !strings.HasSuffix(path, "logout") {
+			checkLogin(c)
+		}
 	})
 	g.POST("/:postAction", a.postHandler)
 	g.GET("/:getAction", a.getHandler)
 }
 
-func (a *APIv2Handler) postHandler(c *gin.Context) {
-	username := a.findUsername(c)
+func (a *APIHandler) postHandler(c *gin.Context) {
+	loginUser := GetLoginUser(c)
 	action := c.Param("postAction")
 
 	switch action {
+	case "login":
+		a.ApiService.Login(c)
+	case "changePass":
+		a.ApiService.ChangePass(c)
 	case "save":
-		a.ApiService.Save(c, username)
+		a.ApiService.Save(c, loginUser)
 	case "restartApp":
 		a.ApiService.RestartApp(c)
 	case "restartSb":
@@ -50,15 +50,60 @@ func (a *APIv2Handler) postHandler(c *gin.Context) {
 		a.ApiService.LinkConvert(c)
 	case "importdb":
 		a.ApiService.ImportDb(c)
+	case "addToken":
+		a.ApiService.AddToken(c)
+		a.apiv2.ReloadTokens()
+	case "deleteToken":
+		a.ApiService.DeleteToken(c)
+		a.apiv2.ReloadTokens()
+	case "deleteClientFromInbound":
+		inboundID := c.Request.FormValue("inboundID")
+		clientID := c.Request.FormValue("clientID")
+		err := a.ApiService.ClientService.DeleteClientFromInbound(inboundID, clientID)
+		jsonMsg(c, "", err)
+	case "updateClientInInbound":
+		inboundID := c.Request.FormValue("inboundID")
+		clientID := c.Request.FormValue("clientID")
+		expiry := c.Request.FormValue("expiry")
+		limit, _ := strconv.Atoi(c.Request.FormValue("limit"))
+		client := struct {
+			ID     string
+			Expiry string
+			Limit  int
+		}{
+			ID:     clientID,
+			Expiry: expiry,
+			Limit:  limit,
+		}
+		err := a.ApiService.ClientService.UpdateClientInInbound(inboundID, client)
+		jsonMsg(c, "", err)
+	case "addClientToInbound":
+		inboundID := c.Request.FormValue("inboundID")
+		clientID := c.Request.FormValue("clientID")
+		expiry := c.Request.FormValue("expiry")
+		limit, _ := strconv.Atoi(c.Request.FormValue("limit"))
+		client := struct {
+			ID     string
+			Expiry string
+			Limit  int
+		}{
+			ID:     clientID,
+			Expiry: expiry,
+			Limit:  limit,
+		}
+		err := a.ApiService.ClientService.AddClientToInbound(inboundID, client)
+		jsonMsg(c, "", err)
 	default:
 		jsonMsg(c, "failed", common.NewError("unknown action: ", action))
 	}
 }
 
-func (a *APIv2Handler) getHandler(c *gin.Context) {
+func (a *APIHandler) getHandler(c *gin.Context) {
 	action := c.Param("getAction")
 
 	switch action {
+	case "logout":
+		a.ApiService.Logout(c)
 	case "load":
 		a.ApiService.LoadData(c)
 	case "inbounds", "outbounds", "endpoints", "tls", "clients", "config":
@@ -85,45 +130,9 @@ func (a *APIv2Handler) getHandler(c *gin.Context) {
 		a.ApiService.GetKeypairs(c)
 	case "getdb":
 		a.ApiService.GetDb(c)
+	case "tokens":
+		a.ApiService.GetTokens(c)
 	default:
 		jsonMsg(c, "failed", common.NewError("unknown action: ", action))
-	}
-}
-
-func (a *APIv2Handler) findUsername(c *gin.Context) string {
-	token := c.Request.Header.Get("Token")
-	for index, t := range *a.tokens {
-		if t.Expiry > 0 && t.Expiry < time.Now().Unix() {
-			(*a.tokens) = append((*a.tokens)[:index], (*a.tokens)[index+1:]...)
-			continue
-		}
-		if t.Token == token {
-			return t.Username
-		}
-	}
-	return ""
-}
-
-func (a *APIv2Handler) checkToken(c *gin.Context) {
-	username := a.findUsername(c)
-	if username != "" {
-		c.Next()
-		return
-	}
-	jsonMsg(c, "", common.NewError("invalid token"))
-	c.Abort()
-}
-
-func (a *APIv2Handler) ReloadTokens() {
-	tokens, err := a.ApiService.LoadTokens()
-	if err == nil {
-		var newTokens []TokenInMemory
-		err = json.Unmarshal(tokens, &newTokens)
-		if err != nil {
-			logger.Error("unable to load tokens: ", err)
-		}
-		a.tokens = &newTokens
-	} else {
-		logger.Error("unable to load tokens: ", err)
 	}
 }
