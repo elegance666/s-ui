@@ -28,6 +28,9 @@ func (a *APIHandler) initRouter(g *gin.RouterGroup) {
 	})
 	g.POST("/:postAction", a.postHandler)
 	g.GET("/:getAction", a.getHandler)
+	g.POST("/addClient", a.addClientHandler)
+    g.POST("/updateClient", a.updateClientHandler)
+    g.POST("/delClient", a.delClientHandler)
 }
 
 func (a *APIHandler) postHandler(c *gin.Context) {
@@ -97,4 +100,61 @@ func (a *APIHandler) getHandler(c *gin.Context) {
 	default:
 		jsonMsg(c, "failed", common.NewError("unknown action: ", action))
 	}
+}
+
+func (a *APIHandler) addClientHandler(c *gin.Context) {
+    var request AddClientRequest
+    if err := c.ShouldBindJSON(&request); err != nil {
+        c.JSON(400, gin.H{"error": "Invalid request"})
+        return
+    }
+
+    inboundID := request.ID
+    client := request.Settings.Clients[0]
+
+    err := addClientToInbound(inboundID, client)
+    if err != nil {
+        c.JSON(500, gin.H{"error": "Failed to add client"})
+        return
+    }
+
+    c.JSON(200, gin.H{"message": "Client added successfully"})
+}
+
+func (a *APIHandler) updateClientHandler(c *gin.Context) {
+    var request UpdateClientRequest
+    if err := c.ShouldBindJSON(&request); err != nil {
+        c.JSON(400, gin.H{"error": "Invalid request"})
+        return
+    }
+
+    inboundID := request.ID
+    client := request.Settings.Clients[0]
+
+    err := updateClientInInbound(inboundID, client)
+    if err != nil {
+        c.JSON(500, gin.H{"error": "Failed to update client"})
+        return
+    }
+
+    c.JSON(200, gin.H{"message": "Client updated successfully"})
+}
+
+func (a *APIHandler) delClientHandler(c *gin.Context) {
+    var request DeleteClientRequest
+    if err := c.ShouldBindJSON(&request); err != nil {
+        c.JSON(400, gin.H{"error": "Invalid request"})
+        return
+    }
+
+    inboundID := request.ID
+    clientID := request.ClientID
+
+    err := deleteClientFromInbound(inboundID, clientID)
+    if err != nil {
+        c.JSON(500, gin.H{"error": "Failed to delete client"})
+        return
+    }
+
+    c.JSON(200, gin.H{"message": "Client deleted successfully"})
 }
