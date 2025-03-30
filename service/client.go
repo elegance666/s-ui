@@ -369,3 +369,135 @@ func (s *ClientService) uniqueAppendInboundIds(a []uint, b []uint) []uint {
 	}
 	return res
 }
+
+func (s *ClientService) DeleteClientFromInbound(inboundID string, clientID string) error {
+	db := database.GetDB()
+	var inbound model.Inbound
+	err := db.Model(model.Inbound{}).Where("id = ?", inboundID).First(&inbound).Error
+	if err != nil {
+		return err
+	}
+
+	var settings map[string]interface{}
+	err = json.Unmarshal(inbound.Options, &settings)
+	if err != nil {
+		return err
+	}
+
+	clients, ok := settings["clients"].([]interface{})
+	if !ok {
+		return common.NewError("invalid clients format")
+	}
+
+	var newClients []interface{}
+	for _, client := range clients {
+		clientMap := client.(map[string]interface{})
+		if clientMap["id"].(string) != clientID {
+			newClients = append(newClients, client)
+		}
+	}
+
+	settings["clients"] = newClients
+	inbound.Options, err = json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+
+	err = db.Save(&inbound).Error
+	if err != nil {
+		return err
+	}
+
+	return s.InboundService.RestartInbounds(db, []uint{inbound.Id})
+}
+
+func (s *ClientService) UpdateClientInInbound(inboundID string, client struct {
+	ID     string
+	Expiry string
+	Limit  int
+}) error {
+	db := database.GetDB()
+	var inbound model.Inbound
+	err := db.Model(model.Inbound{}).Where("id = ?", inboundID).First(&inbound).Error
+	if err != nil {
+		return err
+	}
+
+	var settings map[string]interface{}
+	err = json.Unmarshal(inbound.Options, &settings)
+	if err != nil {
+		return err
+	}
+
+	clients, ok := settings["clients"].([]interface{})
+	if !ok {
+		return common.NewError("invalid clients format")
+	}
+
+	for i, c := range clients {
+		clientMap := c.(map[string]interface{})
+		if clientMap["id"].(string) == client.ID {
+			clientMap["expiry"] = client.Expiry
+			clientMap["limit"] = client.Limit
+			clients[i] = clientMap
+			break
+		}
+	}
+
+	settings["clients"] = clients
+	inbound.Options, err = json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+
+	err = db.Save(&inbound).Error
+	if err != nil {
+		return err
+	}
+
+	return s.InboundService.RestartInbounds(db, []uint{inbound.Id})
+}
+
+func (s *ClientService) AddClientToInbound(inboundID string, client struct {
+	ID     string
+	Expiry string
+	Limit  int
+}) error {
+	db := database.GetDB()
+	var inbound model.Inbound
+	err := db.Model(model.Inbound{}).Where("id = ?", inboundID).First(&inbound).Error
+	if err != nil {
+		return err
+	}
+
+	var settings map[string]interface{}
+	err = json.Unmarshal(inbound.Options, &settings)
+	if err != nil {
+		return err
+	}
+
+	clients, ok := settings["clients"].([]interface{})
+	if !ok {
+		clients = []interface{}{}
+	}
+
+	newClient := map[string]interface{}{
+		"id":     client.ID,
+		"expiry": client.Expiry,
+		"limit":  client.Limit,
+	}
+
+	clients = append(clients, newClient)
+	settings["clients"] = clients
+	inbound.Options, err = json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+
+	err = db.Save(&inbound).Error
+	if err != nil {
+		return err
+	}
+
+	return s.InboundService.RestartInbounds(db, []uint{inbound.Id})
+}
